@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:context="http://www.springframework.org/schema/context" xmlns:aop="http://www.springframework.org/schema/aop"
+	xmlns:tx="http://www.springframework.org/schema/tx" xmlns:cache="http://www.springframework.org/schema/cache"
+	xmlns:task="http://www.springframework.org/schema/task"
+	xsi:schemaLocation="http://www.springframework.org/schema/cache http://www.springframework.org/schema/cache/spring-cache-4.2.xsd
+		http://www.springframework.org/schema/task http://www.springframework.org/schema/task/spring-task-4.3.xsd
+		http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-4.2.xsd
+		http://www.springframework.org/schema/aop http://www.springframework.org/schema/aop/spring-aop-4.2.xsd
+		http://www.springframework.org/schema/tx http://www.springframework.org/schema/tx/spring-tx-4.2.xsd">
+
+	<!-- Root Context: defines shared resources visible to all other web components -->
+	<context:property-placeholder location="classpath:database.properties" />
+	<!--
+		mulit config   
+		<context-property-placeholder location="classpath:config/jdbc.properties, classpath:config/monitor.properties"/>
+	 -->
+
+	<bean id="abstractDataSource" class="org.apache.commons.dbcp2.BasicDataSource" destroy-method="close">
+		<property name="initialSize" value="${database.common.initialSize}" />
+		<property name="maxTotal" value="${database.common.maxTotal}" />
+		<property name="maxWaitMillis" value="${database.common.maxWaitMillis}" />
+		<property name="maxIdle" value="${database.common.maxIdle}" />
+		<property name="minIdle" value="${database.common.minIdle}" />
+		<property name="testOnBorrow" value="${database.common.testOnBorrow}" />
+		<property name="testOnReturn" value="${database.common.testOnReturn}" />
+		<property name="validationQuery" value="${database.common.validationQuery}" />
+		<property name="testWhileIdle" value="${database.common.testWhileIdle}" />
+		<property name="timeBetweenEvictionRunsMillis" value="${database.common.timeBetweenEvictionRunsMillis}" />
+		<property name="minEvictableIdleTimeMillis" value="${database.common.minEvictableIdleTimeMillis}" />
+		<property name="numTestsPerEvictionRun" value="${database.common.numTestsPerEvictionRun}" />
+		<property name="removeAbandonedTimeout" value="${database.common.removeAbandonedTimeout}" />
+		<property name="removeAbandonedOnBorrow" value="${database.common.removeAbandonedOnBorrow}" />
+		<property name="logAbandoned" value="${database.common.logAbandoned}" />
+	</bean>
+
+	<bean id="masterDataSource" parent="abstractDataSource">
+		<property name="driverClassName" value="${database.master.driverClassName}" />
+		<property name="url" value="${database.master.url}" />
+		<property name="username" value="${database.master.username}" />
+		<property name="password" value="${database.master.password}" />
+	</bean>
+
+	<bean id="slaveDataSource" parent="abstractDataSource">
+		<property name="driverClassName" value="${database.slave.driverClassName}" />
+		<property name="url" value="${database.slave.url}" />
+		<property name="username" value="${database.slave.username}" />
+		<property name="password" value="${database.slave.password}" />
+	</bean>
+
+
+	<bean id="dataSource" class="com.audien.common.db.RoutingDataSource">
+		<property name="targetDataSources">
+			<map key-type="com.audien.common.db.DataSourceType">
+				<entry key="MASTER" value-ref="masterDataSource" />
+				<entry key="SLAVE" value-ref="slaveDataSource" />
+			</map>
+		</property>
+		<property name="defaultTargetDataSource" ref="masterDataSource" />
+	</bean>
+
+	<bean id="transactionManager" class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+		<property name="dataSource" ref="dataSource" />
+	</bean>
+
+	<bean id="sqlSessionFactory" class="org.mybatis.spring.SqlSessionFactoryBean">
+		<property name="dataSource" ref="dataSource" />
+		<property name="configLocation" value="classpath:/mybatis-config.xml"></property>
+		<property name="mapperLocations" value="classpath:mappers/**/*Mapper.xml"></property>
+	</bean>
+
+	<bean id="sqlSession" class="org.mybatis.spring.SqlSessionTemplate" destroy-method="clearCache">
+		<constructor-arg name="sqlSessionFactory" ref="sqlSessionFactory"></constructor-arg>
+	</bean>
+
+	<bean id="jedisConnectinFactory" class="org.springframework.data.redis.connection.jedis.JedisConnectionFactory">
+		<property name="hostName" value="${redis.host}" />
+		<property name="port" value="${redis.port}" />
+		<property name="usePool" value="true" />
+	</bean>
+
+	<bean id="redisTemplate" class="org.springframework.data.redis.core.RedisTemplate">
+		<property name="connectionFactory" ref="jedisConnectinFactory" />
+	</bean>
+
+
+	<!-- CSRF Filter -->
+	<bean id="csrfFilter" class="org.springframework.security.web.csrf.CsrfFilter">
+		<constructor-arg>
+			<bean class="org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository" />
+		</constructor-arg>
+	</bean>
+	<bean id="requestDataValueProcessor" class="org.springframework.security.web.servlet.support.csrf.CsrfRequestDataValueProcessor" />
+
+
+	<aop:aspectj-autoproxy proxy-target-class="true" />
+	<tx:annotation-driven transaction-manager="transactionManager" proxy-target-class="true" order="2" />
+
+	<cache:annotation-driven cache-manager="cacheManager" />
+	<bean id="cacheManager" class="org.springframework.cache.ehcache.EhCacheCacheManager">
+		<property name="cacheManager" ref="ehcache"></property>
+	</bean>
+	<bean id="ehcache" class="org.springframework.cache.ehcache.EhCacheManagerFactoryBean">
+		<property name="configLocation" value="classpath:/ehcache.xml" />
+		<property name="shared" value="true" />
+	</bean>
+
+	<context:component-scan base-package="com.audien.b2c.persist" />
+	<context:component-scan base-package="com.audien.b2c.service" />
+	<context:component-scan base-package="com.audien.common.aop" />
+
+	<context:component-scan base-package="com.audien.common.crontab" />
+	<task:scheduler id="jobScheduler" pool-size="10" />
+	<task:annotation-driven scheduler="jobScheduler" />
+	<!-- <task:executor id="gsTaskExecutor" pool-size="10" />
+	<task:annotation-driven executor="gsTaskExecutor" scheduler="jobScheduler" /> -->
+</beans>
